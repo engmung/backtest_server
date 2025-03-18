@@ -13,4 +13,5 @@ services:
       - ./.env:/app/.env
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=Asia/Seoul
     restart: unless-stopped
