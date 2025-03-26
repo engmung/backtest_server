@@ -74,10 +74,11 @@ async def process_channel(page: Dict[str, Any]) -> bool:
         if not latest_video:
             logger.warning(f"채널에서 키워드가 포함된 영상을 찾을 수 없습니다: {channel_url}")
             return False
-        
-        # 라이브 예정(Upcoming) 영상인 경우 처리하지 않고 활성화 상태 유지
-        if latest_video.get("is_upcoming", False):
-            logger.info(f"라이브 예정 영상입니다: {latest_video['title']}. 다음에 다시 확인합니다.")
+
+        # 라이브 예정(Upcoming) 또는 라이브 중(Live) 영상인 경우 처리하지 않고 활성화 상태 유지
+        if latest_video.get("is_upcoming", False) or latest_video.get("is_live", False):
+            status = "라이브 예정" if latest_video.get("is_upcoming", False) else "라이브 중"
+            logger.info(f"{status} 영상입니다: {latest_video['title']}. 다음에 다시 확인합니다.")
             return False
         
         # 이미 스크립트가 있는지 확인
