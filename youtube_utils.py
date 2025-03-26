@@ -366,11 +366,23 @@ async def process_channel_url(channel_url: str, keyword: str, max_retries: int =
                     logger.warning(f"키워드 '{keyword}'가 포함된 영상을 찾을 수 없습니다: {channel_url}")
                     return None
                 
-                # 일반 영상만 필터링 (라이브 중, 라이브 예정 제외)
+                # 중요: 라이브 중인 영상이 있으면 우선적으로 반환
+                live_videos = [v for v in videos if v.get("is_live", False)]
+                if live_videos:
+                    logger.info(f"현재 라이브 중인 영상을 발견했습니다: {live_videos[0]['title']}")
+                    return live_videos[0]
+                
+                # 라이브 예정 영상도 포함
+                upcoming_videos = [v for v in videos if v.get("is_upcoming", False)]
+                if upcoming_videos:
+                    logger.info(f"라이브 예정 영상을 발견했습니다: {upcoming_videos[0]['title']}")
+                    return upcoming_videos[0]
+                
+                # 일반 영상만 필터링
                 normal_videos = [v for v in videos if not v.get("is_live", False) and not v.get("is_upcoming", False)]
                 
                 if not normal_videos:
-                    logger.warning(f"키워드 '{keyword}'가 포함된 일반 영상을 찾을 수 없습니다. 라이브 또는 라이브 예정 영상만 있습니다.")
+                    logger.warning(f"키워드 '{keyword}'가 포함된 일반 영상을 찾을 수 없습니다.")
                     return None
                 
                 # 가장 최근 일반 영상 선택

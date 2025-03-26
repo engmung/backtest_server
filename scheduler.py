@@ -78,7 +78,7 @@ async def process_channel(page: Dict[str, Any]) -> bool:
         # 라이브 예정(Upcoming) 또는 라이브 중(Live) 영상인 경우 처리하지 않고 활성화 상태 유지
         if latest_video.get("is_upcoming", False) or latest_video.get("is_live", False):
             status = "라이브 예정" if latest_video.get("is_upcoming", False) else "라이브 중"
-            logger.info(f"{status} 영상입니다: {latest_video['title']}. 다음에 다시 확인합니다.")
+            logger.info(f"{status} 영상입니다: {latest_video['title']}. 활성화 상태 유지하고 다음에 다시 확인합니다.")
             return False
         
         # 이미 스크립트가 있는지 확인
@@ -96,80 +96,84 @@ async def process_channel(page: Dict[str, Any]) -> bool:
         # 스크립트 가져오기
         script = await get_video_transcript(latest_video["video_id"])
         
-        # 스크립트가 있을 경우만 페이지 생성
-        if script and not script.startswith("스크립트를 가져올 수 없습니다"):
-            # 영상 날짜 파싱 - 정확한 업로드 날짜로 변환
-            upload_date_datetime = parse_upload_date(latest_video.get("upload_date", ""))
-            upload_date_iso = upload_date_datetime.isoformat()
-            
-            # 스크립트 DB에 새 페이지 생성 (속성 설정)
-            properties = {
-                # 제목은 참고용 DB의 키워드만 사용
-                "제목": {
-                    "title": [
-                        {
-                            "text": {
-                                "content": keyword
-                            }
+        # 스크립트가 없거나 에러 메시지를 반환한 경우
+        if not script or script.startswith("스크립트를 가져올 수 없습니다"):
+            logger.warning(f"스크립트를 가져올 수 없습니다: {latest_video['title']}")
+            logger.info(f"자막이 비활성화되었거나 추출할 수 없는 영상입니다. 채널 '{channel_name}'을 활성화 상태로 유지합니다.")
+            return False
+        
+        # 스크립트가 있는 경우 페이지 생성
+        # 영상 날짜 파싱 - 정확한 업로드 날짜로 변환
+        upload_date_datetime = parse_upload_date(latest_video.get("upload_date", ""))
+        upload_date_iso = upload_date_datetime.isoformat()
+        
+        # 스크립트 DB에 새 페이지 생성 (속성 설정)
+        properties = {
+            # 제목은 참고용 DB의 키워드만 사용
+            "제목": {
+                "title": [
+                    {
+                        "text": {
+                            "content": keyword
                         }
-                    ]
-                },
-                # URL 속성 (기존의 원본 영상)
-                "URL": {
-                    "url": latest_video["url"]
-                },
-                # 영상 날짜 (추출 시간 대신 영상 업로드 날짜)
-                "영상 날짜": {
-                    "date": {
-                        "start": upload_date_iso
                     }
-                },
-                # 채널명 속성
-                "채널명": {
-                    "select": {
-                        "name": channel_name
-                    }
-                },
-                # 영상 길이 속성 추가
-                "영상 길이": {
-                    "rich_text": [
-                        {
-                            "text": {
-                                "content": latest_video.get("video_length", "알 수 없음")
-                            }
+                ]
+            },
+            # URL 속성 (기존의 원본 영상)
+            "URL": {
+                "url": latest_video["url"]
+            },
+            # 영상 날짜 (추출 시간 대신 영상 업로드 날짜)
+            "영상 날짜": {
+                "date": {
+                    "start": upload_date_iso
+                }
+            },
+            # 채널명 속성
+            "채널명": {
+                "select": {
+                    "name": channel_name
+                }
+            },
+            # 영상 길이 속성 추가
+            "영상 길이": {
+                "rich_text": [
+                    {
+                        "text": {
+                            "content": latest_video.get("video_length", "알 수 없음")
                         }
-                    ]
-                },
-                # 상태 속성 (분석/완료 두 가지)
-                "상태": {
-                    "select": {
-                        "name": "분석"
                     }
+                ]
+            },
+            # 상태 속성 (분석/완료 두 가지)
+            "상태": {
+                "select": {
+                    "name": "분석"
                 }
             }
+        }
+        
+        # 디버깅 정보 로깅
+        logger.info(f"Creating page for video: {latest_video['title']}")
+        logger.info(f"Keyword: {keyword}, Channel: {channel_name}")
+        logger.info(f"Upload date: {upload_date_datetime.strftime('%Y-%m-%d')}")
+        
+        script_page = await create_script_report_page(SCRIPT_DB_ID, properties, script)
+        
+        if script_page:
+            logger.info(f"스크립트+보고서 페이지 생성 완료: {keyword}")
             
-            # 디버깅 정보 로깅
-            logger.info(f"Creating page for video: {latest_video['title']}")
-            logger.info(f"Keyword: {keyword}, Channel: {channel_name}")
-            logger.info(f"Upload date: {upload_date_datetime.strftime('%Y-%m-%d')}")
+            # 스크립트 생성 성공 시 채널 비활성화
+            await update_notion_page(page_id, {
+                "활성화": {"checkbox": False}
+            })
+            logger.info(f"채널 {channel_name}의 활성화 상태를 비활성화로 변경했습니다.")
             
-            script_page = await create_script_report_page(SCRIPT_DB_ID, properties, script)
-            
-            if script_page:
-                logger.info(f"스크립트+보고서 페이지 생성 완료: {keyword}")
-                
-                # 스크립트 생성 성공 시 채널 비활성화
-                await update_notion_page(page_id, {
-                    "활성화": {"checkbox": False}
-                })
-                logger.info(f"채널 {channel_name}의 활성화 상태를 비활성화로 변경했습니다.")
-                
-                return True
-            else:
-                logger.error(f"스크립트+보고서 페이지 생성 실패: {keyword}")
-                return False
+            return True
         else:
-            logger.warning(f"스크립트를 가져올 수 없습니다: {latest_video['title']}")
+            logger.error(f"스크립트+보고서 페이지 생성 실패: {keyword}")
+            # 페이지 생성에 실패한 경우 활성화 상태 유지
+            logger.info(f"스크립트 생성 실패로 채널 '{channel_name}'을 활성화 상태로 유지합니다.")
             return False
         
     except Exception as e:
