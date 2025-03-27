@@ -15,6 +15,7 @@ from notion_utils import (
     SCRIPT_DB_ID
 )
 from youtube_utils import process_channel_url, get_video_transcript, parse_upload_date
+from gemini_analyzer import analyze_script_with_gemini
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +159,22 @@ async def process_channel(page: Dict[str, Any]) -> bool:
         logger.info(f"Keyword: {keyword}, Channel: {channel_name}")
         logger.info(f"Upload date: {upload_date_datetime.strftime('%Y-%m-%d')}")
         
-        script_page = await create_script_report_page(SCRIPT_DB_ID, properties, script)
+        try:
+            # Gemini로 스크립트 분석 - 스크립트는 분석에만 사용하고 결과에는 포함하지 않음
+            logger.info(f"Gemini API로 스크립트 분석 시작: {latest_video['title']}")
+            analysis = await analyze_script_with_gemini(script, latest_video['title'], channel_name)
+            
+            # 분석 결과만 사용 (원본 스크립트 제외)
+            combined_content = analysis
+            logger.info("AI 분석 보고서가 성공적으로 생성되었습니다.")
+        except Exception as e:
+            logger.error(f"AI 분석 중 오류 발생: {str(e)}")
+            # 분석 실패 시 간단한 오류 메시지 저장 (스크립트 포함하지 않음)
+            combined_content = f"# AI 분석 보고서\n\n## 분석 오류\n\n분석 과정에서 오류가 발생했습니다: {str(e)}"
+            logger.warning("AI 분석에 실패했습니다. 오류 메시지를 저장합니다.")
+        
+        # 수정된 내용으로 페이지 생성
+        script_page = await create_script_report_page(SCRIPT_DB_ID, properties, combined_content)
         
         if script_page:
             logger.info(f"스크립트+보고서 페이지 생성 완료: {keyword}")
@@ -168,6 +184,9 @@ async def process_channel(page: Dict[str, Any]) -> bool:
                 "활성화": {"checkbox": False}
             })
             logger.info(f"채널 {channel_name}의 활성화 상태를 비활성화로 변경했습니다.")
+            
+            # '분석' 상태 유지 (별도 업데이트 없음)
+            logger.info(f"생성된 페이지가 '분석' 상태로 유지됩니다.")
             
             return True
         else:
@@ -237,13 +256,37 @@ async def process_channels_by_time(target_hour: int) -> None:
     
     logger.info(f"{target_hour}시에 처리할 채널 {len(channels_to_process)}개를 찾았습니다.")
     
-    # 채널 처리
+    # 채널 처리 - Gemini API 제한(1분당 2개)을 고려하여 순차적으로 처리
     success_count = 0
     
-    for channel_page in channels_to_process:
-        success = await process_channel(channel_page)
-        if success:
-            success_count += 1
+    for index, channel_page in enumerate(channels_to_process):
+        try:
+            channel_name = "Unknown"
+            properties = channel_page.get("properties", {})
+            if "채널명" in properties and "select" in properties["채널명"] and properties["채널명"]["select"]:
+                channel_name = properties["채널명"]["select"]["name"]
+                
+            logger.info(f"채널 처리 시작 ({index+1}/{len(channels_to_process)}): {channel_name}")
+            success = await process_channel(channel_page)
+            
+            if success:
+                success_count += 1
+                logger.info(f"채널 처리 성공: {channel_name}")
+            else:
+                logger.warning(f"채널 처리 실패: {channel_name}")
+                
+            # 다음 채널 처리 전 1분 대기 (API 제한 1분당 2개 고려)
+            # 마지막 항목이 아니면 대기
+            if index < len(channels_to_process) - 1:
+                logger.info(f"API 제한 준수를 위해 1분 대기 중...")
+                await asyncio.sleep(60)  # 1분 대기
+                
+        except Exception as e:
+            logger.error(f"채널 처리 중 예외 발생: {str(e)}")
+            # 다음 채널 처리 전 1분 대기
+            if index < len(channels_to_process) - 1:
+                logger.info(f"오류 후 API 제한 준수를 위해 1분 대기 중...")
+                await asyncio.sleep(60)  # 1분 대기
     
     logger.info(f"{target_hour}시 처리 완료: {success_count}/{len(channels_to_process)} 채널 성공")
 
