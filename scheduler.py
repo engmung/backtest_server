@@ -388,11 +388,11 @@ async def simulate_scheduler_at_time(hour: int, minute: int, weekday: int, simul
         extraction_times = []
         
         if upload_time < 12:  # 오전 영상
-            extraction_times = [9, 10, 11]
+            extraction_times = [9, 10, 11, 12]
         elif upload_time < 20:  # 오후 영상
             extraction_times = [upload_time + 2, upload_time + 3, upload_time + 4]
         else:  # 늦은 저녁 영상
-            extraction_times = [22, 23, 0, 1, 2, 3]
+            extraction_times = [22, 23, 0, 1, 2, 3, 6]
         
         # 현재 시각에 맞는 작업 확인
         if hour in extraction_times:
