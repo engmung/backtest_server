@@ -1,22 +1,82 @@
-version: "3"
+version: "3.8" # 버전 명시 (문자열로)
 
 services:
+  # --- Traefik 리버스 프록시 서비스 ---
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      # 외부 요청을 받을 HTTP(80), HTTPS(443) 포트만 Traefik에 연결
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    command:
+      # --log.level=DEBUG
+      # --api.insecure=true # 필요시 Traefik 대시보드 활성화 (http://<RPI_IP>:8080)
+      --providers.docker=true
+      --providers.docker.exposedbydefault=false
+      --entrypoints.web.address=:80
+      --entrypoints.websecure.address=:443
+      --certificatesresolvers.myresolver.acme.email=lsh678902@gmail.com
+      --certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json
+      --certificatesresolvers.myresolver.acme.httpchallenge=true
+      --certificatesresolvers.myresolver.acme.httpchallenge.entrypoint=web
+    networks:
+      - traefik-proxy # Traefik용 네트워크
+
+  # --- 사용자 애플리케이션 서비스 (stock-analysis-api) ---
   stock-analysis-api:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8010:8010"
+    container_name: stock-analysis-api # 컨테이너 이름 지정
+    restart: unless-stopped
+    # ports: # ★★★ Traefik을 사용하므로 직접적인 포트 매핑은 제거합니다 ★★★
+    #  - "8010:8010"
     volumes:
+      # 소스 코드 변경 시 자동 리로드를 위해 볼륨 마운트 유지 가능
       - .:/app
+      # .env 파일 마운트 (중요: .env 파일이 docker-compose.yml과 같은 위치에 있어야 함)
       - ./.env:/app/.env
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Seoul
+      # .env 파일에서 읽어올 환경 변수들
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      # 필요한 경우 yfinance API 제한을 우회하기 위한 프록시 설정 추가 가능
       - HTTP_PROXY=${HTTP_PROXY}
       - HTTPS_PROXY=${HTTPS_PROXY}
-      # matplotlib 및 plotly가 정상적으로 작동하도록 컨테이너에 디스플레이 없음 설정
       - MPLBACKEND=Agg
-    restart: unless-stopped
+    networks:
+      # Traefik과 통신하기 위해 동일한 네트워크에 연결
+      - traefik-proxy
+    labels:
+      # --- Traefik 설정 라벨 ---
+      - "traefik.enable=true" # Traefik 활성화
+
+      # HTTPS 라우터 (도메인: aengmung.tplinkdns.com)
+      - "traefik.http.routers.stockapi-secure.rule=Host(`aengmung.tplinkdns.com`)"
+      - "traefik.http.routers.stockapi-secure.entrypoints=websecure"
+      - "traefik.http.routers.stockapi-secure.tls=true"
+      - "traefik.http.routers.stockapi-secure.tls.certresolver=myresolver"
+
+      # HTTP -> HTTPS 리다이렉션 라우터
+      - "traefik.http.routers.stockapi-http.rule=Host(`aengmung.tplinkdns.com`)"
+      - "traefik.http.routers.stockapi-http.entrypoints=web"
+      - "traefik.http.routers.stockapi-http.middlewares=redirect-to-https@docker"
+
+      # 리다이렉션 미들웨어 정의
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+
+      # 내부 서비스 포트 지정 (컨테이너 내부 포트 8010)
+      - "traefik.http.services.stockapi-service.loadbalancer.server.port=8010"
+
+# --- 네트워크 정의 ---
+networks:
+  traefik-proxy:
+    name: traefik-proxy
