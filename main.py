@@ -1,11 +1,23 @@
+"""
+주식, 암호화폐, 원자재 백테스팅 API 서비스
+- 자연어 입력을 통한 백테스팅 분석
+- 다양한 자산 유형(주식, 암호화폐, 원자재) 지원
+- yfinance 기반 데이터 소스
+- LLM(Gemini) 활용 텍스트 분석
+"""
+
 import os
 import logging
 from datetime import datetime
-from typing import Dict, Any
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from typing import Dict, List, Any, Optional
+
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+
+from text_analyzer import TextAnalyzer
+from backtest import BacktestAnalyzer
 
 # 환경 변수 로드
 load_dotenv()
@@ -17,11 +29,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 모듈화된 컴포넌트 임포트
-from scheduler import setup_scheduler, simulate_scheduler_at_time
-from notion_utils import query_notion_database, REFERENCE_DB_ID
-
-app = FastAPI(title="YouTube Script Extractor with Notion Integration")
+# FastAPI 앱 설정
+app = FastAPI(title="종합 자산 백테스팅 API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,81 +40,133 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class NotionSyncRequest(BaseModel):
-    pass  # 빈 요청 본문, 단순히 동기화 작업 트리거용
+# 자연어 백테스팅 요청 모델
+class NaturalBacktestRequest(BaseModel):
+    prompt: str
 
-class NotionSyncResponse(BaseModel):
-    status: str
-    message: str
-
+# API 엔드포인트
 @app.get("/")
 async def root():
-    return {"message": "YouTube Script Extractor with Notion Integration"}
+    return {"message": "종합 자산 백테스팅 API", "version": "1.0.0"}
 
-@app.post("/sync-notion-db", response_model=NotionSyncResponse)
-async def sync_notion_db(background_tasks: BackgroundTasks):
-    """참고용 DB의 모든 채널에 대해 스크립트를 추출하고 스크립트 DB에 저장합니다."""
-    from youtube_utils import process_channel_url, get_video_transcript
+@app.post("/natural-backtest")
+async def natural_backtest(request: NaturalBacktestRequest):
+    """
+    자연어 프롬프트로 백테스팅을 요청합니다.
     
+    예:
+    - "삼성전자를 3개월 전에 100만원어치 샀다면 지금 얼마가 되었을까?"
+    - "금을 1년 전에 투자했다면 수익이 얼마나 났을까요?"
+    - "비트코인 6개월 전 500만원 투자 성과는?"
+    """
     try:
-        # 참고용 DB의 모든 페이지 가져오기
-        reference_pages = await query_notion_database(REFERENCE_DB_ID)
-        logger.info(f"Found {len(reference_pages)} channels in reference database")
+        user_prompt = request.prompt
+        logger.info(f"자연어 백테스팅 요청: '{user_prompt}'")
         
-        if not reference_pages:
-            return {"status": "warning", "message": "참고용 DB에서 채널을 가져올 수 없습니다."}
+        # 텍스트 분석기 초기화
+        text_analyzer = TextAnalyzer()
         
-        # 백그라운드 작업으로 실행
-        background_tasks.add_task(process_channels_manually, reference_pages)
-        return {"status": "processing", "message": "동기화 작업이 시작되었습니다. 완료까지 시간이 걸릴 수 있습니다."}
+        # LLM으로 매개변수 추출
+        analysis_result = await text_analyzer.analyze_backtest_request(user_prompt)
+        
+        if analysis_result["status"] != "success":
+            return {
+                "status": "error", 
+                "message": "요청 분석 중 오류가 발생했습니다", 
+                "details": analysis_result.get("error", "알 수 없는 오류")
+            }
+        
+        # 추출된 매개변수
+        params = analysis_result["params"]
+        logger.info(f"추출된 매개변수: {params}")
+        
+        # 필수 매개변수 확인
+        required_params = ["symbol", "asset_type", "start_date"]
+        missing_params = [param for param in required_params if param not in params]
+        
+        if missing_params:
+            return {
+                "status": "error",
+                "message": f"필수 매개변수가 누락되었습니다: {', '.join(missing_params)}",
+                "params": params
+            }
+        
+        # 백테스팅 전 심볼 처리
+        symbol = params["symbol"]
+        asset_type = params["asset_type"]
+        
+        # 투자 금액 설정 (LLM 분석 결과에서 가져옴)
+        investment_amount = params.get("investment_amount", 1000000)  # 기본값: 100만원
+        
+        # 종료일 설정 (기본값: 현재)
+        end_date = params.get("end_date", datetime.now().strftime("%Y-%m-%d"))
+        
+        # 백테스팅 수행
+        backtest_result = await BacktestAnalyzer.backtest_asset(
+            symbol=symbol,
+            start_date=params["start_date"],
+            end_date=end_date,
+            investment_amount=investment_amount,
+            asset_type=asset_type
+        )
+        
+        # 콘솔에 결과 출력 (로깅용)
+        if backtest_result["status"] == "success":
+            BacktestAnalyzer.print_backtest_result(backtest_result)
+        
+        # 응답 생성
+        return {
+            "status": "success" if backtest_result["status"] == "success" else "error",
+            "request": user_prompt,
+            "parameters": params,
+            "result": backtest_result
+        }
     
     except Exception as e:
-        logger.error(f"데이터베이스 동기화 중 오류: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"데이터베이스 동기화 중 오류가 발생했습니다: {str(e)}")
+        logger.error(f"백테스팅 처리 중 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"백테스팅 처리 중 오류가 발생했습니다: {str(e)}")
 
-@app.post("/test-scheduler")
-async def test_scheduler(test_time: Dict[str, Any]):
+@app.post("/backtest")
+async def backtest_asset(
+    symbol: str = Query(..., description="자산 심볼/코드"),
+    start_date: str = Query(..., description="시작일 (YYYY-MM-DD)"),
+    end_date: str = Query(None, description="종료일 (YYYY-MM-DD)"),
+    investment_amount: float = Query(1000000, description="투자 금액 (원)"),
+    asset_type: str = Query(None, description="자산 유형 (stock/crypto/commodity/etf)")
+):
     """
-    특정 시간을 시뮬레이션하여 스케줄러 테스트
-    
-    요청 본문 예시: 
-    {
-        "hour": 9,
-        "minute": 0,
-        "weekday": 0,  # 0=월요일, 6=일요일
-        "simulate_only": true  # true=동작만 확인, false=실제 실행
-    }
+    지정된 자산에 대한 백테스팅을 수행합니다.
     """
-    hour = test_time.get("hour", datetime.now().hour)
-    minute = test_time.get("minute", 0)
-    weekday = test_time.get("weekday", datetime.now().weekday())
-    simulate_only = test_time.get("simulate_only", True)
+    try:
+        logger.info(f"백테스팅 요청: {symbol} ({start_date} ~ {end_date})")
+        
+        # 종료일 기본값 설정 (현재)
+        if not end_date:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # 백테스팅 수행
+        result = await BacktestAnalyzer.backtest_asset(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            investment_amount=investment_amount,
+            asset_type=asset_type
+        )
+        
+        return result
     
-    result = await simulate_scheduler_at_time(hour, minute, weekday, simulate_only)
-    return {"status": "success", "simulated_time": f"{hour:02d}:{minute:02d}", "weekday": weekday, "result": result}
-
-async def process_channels_manually(reference_pages):
-    """참고용 DB의 모든 채널을 수동으로 처리합니다."""
-    from scheduler import process_channel
-    
-    processed_count = 0
-    
-    for page in reference_pages:
-        try:
-            success = await process_channel(page)
-            if success:
-                processed_count += 1
-        except Exception as e:
-            logger.error(f"채널 처리 중 오류: {str(e)}")
-    
-    logger.info(f"{len(reference_pages)}개의 채널 중 {processed_count}개의 새 스크립트를 추출했습니다.")
+    except Exception as e:
+        logger.error(f"백테스팅 처리 중 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"백테스팅 처리 중 오류가 발생했습니다: {str(e)}")
 
 @app.on_event("startup")
 async def startup_event():
-    """애플리케이션 시작 시 스케줄러 설정"""
-    setup_scheduler()
-    logger.info("Application started with scheduler configured")
+    """애플리케이션 시작 시 초기화"""
+    logger.info("종합 자산 백테스팅 API 시작")
+    logger.info("예시 요청: curl -X POST http://localhost:8001/natural-backtest -H 'Content-Type: application/json' -d '{\"prompt\": \"삼성전자를 3개월 전에 100만원어치 샀다면 지금 얼마가 되었을까?\"}'")
+    logger.info("예시 요청: curl -X POST http://localhost:8001/natural-backtest -H 'Content-Type: application/json' -d '{\"prompt\": \"금을 1년 전에 투자했다면 수익이 얼마나 났을까요?\"}'")
+    logger.info("예시 요청: curl -X POST http://localhost:8001/natural-backtest -H 'Content-Type: application/json' -d '{\"prompt\": \"비트코인 6개월 전 500만원 투자 성과는?\"}'")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8010, reload=True)

@@ -1,12 +1,12 @@
-version: '3'
+version: "3"
 
 services:
-  youtube-script-api:
+  stock-analysis-api:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8001:8001"
+      - "8010:8010"
     volumes:
       - .:/app
       - ./.env:/app/.env
@@ -14,4 +14,9 @@ services:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Seoul
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      # 필요한 경우 yfinance API 제한을 우회하기 위한 프록시 설정 추가 가능
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+      # matplotlib 및 plotly가 정상적으로 작동하도록 컨테이너에 디스플레이 없음 설정
+      - MPLBACKEND=Agg
     restart: unless-stopped
