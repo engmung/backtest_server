@@ -32,9 +32,17 @@ logger = logging.getLogger(__name__)
 # FastAPI 앱 설정
 app = FastAPI(title="종합 자산 백테스팅 API")
 
+# CORS 설정 업데이트 (main.py 파일)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    # 여러 출처를 배열로 지정하여 모두 허용
+    allow_origins=[
+        "https://backtestai-two.vercel.app",  # Vercel 프로덕션 사이트
+        "http://localhost:3000",              # React 개발 서버 (CRA)
+        "http://localhost:5173",              # Vite 개발 서버
+        "http://127.0.0.1:3000",              # 로컬 개발 대체 URL
+        "http://127.0.0.1:5173"               # 로컬 개발 대체 URL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
