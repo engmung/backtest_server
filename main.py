@@ -38,7 +38,7 @@ app.add_middleware(
     # 여러 출처를 배열로 지정하여 모두 허용
     allow_origins=[
         "https://backtestai-two.vercel.app",  # Vercel 프로덕션 사이트
-        "https://backtest.ai.kr/",
+        "https://backtest.ai.kr",
         "http://localhost:3000",              # React 개발 서버 (CRA)
         "http://localhost:5173",              # Vite 개발 서버
         "http://127.0.0.1:3000",              # 로컬 개발 대체 URL
