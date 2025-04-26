@@ -75,8 +75,42 @@ services:
 
       # 내부 서비스 포트 지정 (컨테이너 내부 포트 8010)
       - "traefik.http.services.stockapi-service.loadbalancer.server.port=8010"
+# 개발용용
+# # --- 네트워크 정의 ---
+# networks:
+#   traefik-proxy:
+#     name: traefik-proxy
 
-# --- 네트워크 정의 ---
-networks:
-  traefik-proxy:
-    name: traefik-proxy
+# version: '3.8' # 버전 명시
+
+# services:
+#   # --- 개발 시에는 Traefik 없이 애플리케이션만 실행 ---
+#   stock-analysis-api:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     container_name: stock-analysis-api-dev # 개발용 컨테이너 이름
+#     restart: unless-stopped
+#     # --- ★★★ 개발 시에는 직접 포트 매핑 사용 ★★★ ---
+#     ports:
+#       - "8010:8010"
+#     volumes:
+#       - .:/app
+#       - ./.env:/app/.env
+#     environment:
+#       - PYTHONUNBUFFERED=1
+#       - TZ=Asia/Seoul
+#       - GEMINI_API_KEY=${GEMINI_API_KEY}
+#       - HTTP_PROXY=${HTTP_PROXY}
+#       - HTTPS_PROXY=${HTTPS_PROXY}
+#       - MPLBACKEND=Agg
+#     # --- 개발 시에는 Traefik 관련 네트워크 및 라벨 불필요 ---
+#     # networks:
+#     #   - traefik-proxy
+#     # labels:
+#     #   ... (Traefik 라벨 모두 제거 또는 주석 처리)
+
+# # --- 개발 시에는 Traefik 네트워크 정의 불필요 ---
+# # networks:
+# #   traefik-proxy:
+# #     name: traefik-proxy
