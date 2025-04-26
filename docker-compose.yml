@@ -75,12 +75,12 @@ services:
 
       # 내부 서비스 포트 지정 (컨테이너 내부 포트 8010)
       - "traefik.http.services.stockapi-service.loadbalancer.server.port=8010"
-# 개발용용
-# # --- 네트워크 정의 ---
-# networks:
-#   traefik-proxy:
-#     name: traefik-proxy
 
+  # --- 네트워크 정의 ---
+networks:
+  traefik-proxy:
+    name: traefik-proxy
+# 개발용용
 # version: '3.8' # 버전 명시
 
 # services:
